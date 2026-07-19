@@ -1,5 +1,7 @@
 using Jellyfin.Plugin.MetaTube.Configuration;
 using MediaBrowser.Common.Plugins;
+using Microsoft.Extensions.Logging;
+
 #if __EMBY__
 using MediaBrowser.Common;
 using MediaBrowser.Controller.Plugins;
@@ -23,10 +25,17 @@ public class Plugin : BasePluginSimpleUI<PluginConfiguration>, IHasThumbImage
 #else
 public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {
-    public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer) : base(applicationPaths,
+    private readonly ILogger<Plugin> _logger;
+
+    private readonly IApplicationPaths _applicationPaths;
+
+    public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer, ILogger<Plugin> logger) : base(applicationPaths,
         xmlSerializer)
     {
         Instance = this;
+        _logger = logger;
+
+        _applicationPaths = applicationPaths; 
     }
 #endif
 
@@ -45,12 +54,23 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 #if !__EMBY__
     public IEnumerable<PluginPageInfo> GetPages()
     {
+        _logger.LogInformation("--- METATUBE PLUGIN PATH DEBUGGING ---");
+        _logger.LogInformation("ConfigurationDirectoryPath: {0}", _applicationPaths.ConfigurationDirectoryPath.ToString());
+        _logger.LogInformation("LogDirectoryPath: {0}", _applicationPaths.LogDirectoryPath.ToString());
+        _logger.LogInformation("PluginConfigurationsPath: {0}", _applicationPaths.PluginConfigurationsPath.ToString());
+        _logger.LogInformation("PluginsPath: {0}", _applicationPaths.PluginsPath.ToString());
+        _logger.LogInformation("SystemConfigurationFilePath: {0}", _applicationPaths.SystemConfigurationFilePath.ToString());
+        _logger.LogInformation("Environment target: {0}", "NOT EMBY");
+        _logger.LogInformation("---------------------------------------");
+
         return new[]
         {
             new PluginPageInfo
             {
                 Name = Name,
-                EmbeddedResourcePath = $"{GetType().Namespace}.Configuration.configPage.html"
+                DisplayName = "MetaTube",
+                EnableInMainMenu = true,
+                EmbeddedResourcePath = $"{GetType().Namespace}.Configuration.configPage.html",
             }
         };
     }
