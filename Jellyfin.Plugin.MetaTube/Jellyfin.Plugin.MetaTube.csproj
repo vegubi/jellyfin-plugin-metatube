@@ -6,7 +6,7 @@
         <Platforms>AnyCPU</Platforms>
         <AssemblyName>MetaTube</AssemblyName>
         <Authors>MetaTube</Authors>
-        <Description>MetaTube Plugin for Jellyfin/Emby</Description>
+        <Description>MetaTube Plugin for Jellyfin</Description>
         <Version>$([System.DateTime]::UtcNow.ToString(yyyy.Mdd.Hmm.0))</Version>
         <Copyright>Copyright © 2023 MetaTube</Copyright>
         <RepositoryType>Git</RepositoryType>
