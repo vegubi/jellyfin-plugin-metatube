@@ -3,22 +3,13 @@ using Jellyfin.Plugin.MetaTube.Metadata;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Providers;
-#if __EMBY__
-using MediaBrowser.Model.Logging;
-
-#else
 using Microsoft.Extensions.Logging;
-#endif
 
 namespace Jellyfin.Plugin.MetaTube.Providers;
 
 public class ActorProvider : BaseProvider, IRemoteMetadataProvider<Person, PersonLookupInfo>, IHasOrder
 {
-#if __EMBY__
-    public ActorProvider(ILogManager logManager) : base(logManager.CreateLogger<ActorProvider>())
-#else
     public ActorProvider(ILogger<ActorProvider> logger) : base(logger)
-#endif
     {
     }
 
