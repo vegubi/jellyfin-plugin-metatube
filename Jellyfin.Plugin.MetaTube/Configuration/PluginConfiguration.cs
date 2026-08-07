@@ -59,6 +59,10 @@ public class PluginConfiguration : BasePluginConfiguration
 
     public bool EnableSummaryTranslation { get; set; } = false;
 
+    public bool EnableActorTranslation { get; set; } = false;
+
+    public bool EnableGenreTranslation { get; set; } = false;
+
     public TranslationEngine TranslationEngine { get; set; } = TranslationEngine.Baidu;
 
     public string BaiduAppId { get; set; } = string.Empty;
@@ -79,48 +83,4 @@ public class PluginConfiguration : BasePluginConfiguration
 
     public string OpenAiModel { get; set; } = string.Empty;
 
-    public bool EnableTitleSubstitution { get; set; } = false;
-
-    public string TitleRawSubstitutionTable
-    {
-        get => _titleSubstitutionTable?.ToString();
-        set => _titleSubstitutionTable = SubstitutionTable.Parse(value);
-    }
-
-    public SubstitutionTable GetTitleSubstitutionTable()
-    {
-        return _titleSubstitutionTable;
-    }
-
-    private SubstitutionTable _titleSubstitutionTable;
-
-    public bool EnableActorSubstitution { get; set; } = false;
-
-    public string ActorRawSubstitutionTable
-    {
-        get => _actorSubstitutionTable?.ToString();
-        set => _actorSubstitutionTable = SubstitutionTable.Parse(value);
-    }
-
-    public SubstitutionTable GetActorSubstitutionTable()
-    {
-        return _actorSubstitutionTable;
-    }
-
-    private SubstitutionTable _actorSubstitutionTable;
-
-    public bool EnableGenreSubstitution { get; set; } = false;
-
-    public string GenreRawSubstitutionTable
-    {
-        get => _genreSubstitutionTable?.ToString();
-        set => _genreSubstitutionTable = SubstitutionTable.Parse(value);
-    }
-
-    public SubstitutionTable GetGenreSubstitutionTable()
-    {
-        return _genreSubstitutionTable;
-    }
-
-    private SubstitutionTable _genreSubstitutionTable;
 }

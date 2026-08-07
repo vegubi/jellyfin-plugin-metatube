@@ -87,12 +87,13 @@ public class OrganizeMetadataTask : IScheduledTask
                 _logger.Error("Update ChineseSubtitle for video {0}: {1}", item.Name, e.Message);
             }
 
-            // Remove duplicates.
+            // Remove duplicates and apply genre substitutions from the file.
             var orderedGenres =
-                (Plugin.Instance.Configuration.EnableGenreSubstitution
-                    // Substitute genres.
-                    ? Plugin.Instance.Configuration.GetGenreSubstitutionTable().Substitute(genres)
-                    : genres).Distinct().OrderByString(genre => genre).ToList();
+                Plugin.Instance.GetGenreSubstitutionTableFromFile()
+                    .Substitute(genres)
+                    .Distinct()
+                    .OrderByString(genre => genre)
+                    .ToList();
 
             // Skip updating item if equal.
             if (!orderedGenres.Any() ||

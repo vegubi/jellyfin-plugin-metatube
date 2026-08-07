@@ -93,6 +93,8 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 
     private string GetTranslationLogFilePath() => Path.Combine(GetPluginConfigFolder(), "translation_log.txt");
 
+    internal static void LogTranslation(string message) => Instance?.AppendTranslationLog(message);
+
     private void AppendTranslationLog(string message)
     {
         var logFilePath = GetTranslationLogFilePath();
@@ -105,9 +107,9 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public async Task<Dictionary<string, string>> TrackAndLogMetadataAsync(
         IEnumerable<string> incomingItems,
         SubstitutionTable substitutionTable,
-        string listFilename,
-        string newFilename,
+        string foundFilename,
         bool isActor,
+        bool enableTranslation,
         CancellationToken cancellationToken)
     {
         var translations = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -124,105 +126,96 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         if (!uniqueItems.Any())
             return translations;
 
+        var foundFilePath = Path.Combine(GetPluginConfigFolder(), foundFilename);
+        var existingFoundLines = File.Exists(foundFilePath)
+            ? File.ReadAllLines(foundFilePath).Select(line => line.Trim()).Where(line => !string.IsNullOrWhiteSpace(line)).ToList()
+            : new List<string>();
+
+        var remainingFoundLines = new List<string>();
+        var existingFoundKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var line in existingFoundLines)
+        {
+            var key = ParseFoundKey(line);
+            if (!string.IsNullOrWhiteSpace(key) && !TryGetSubstitutionValue(key, substitutionTable, out _, out _))
+            {
+                remainingFoundLines.Add(line);
+                existingFoundKeys.Add(key);
+            }
+        }
+
         foreach (var item in uniqueItems)
         {
-            if (substitutionTable.TryGetValue(item, out var substitutionValue))
-            {
-                translations[item] = substitutionValue?.Trim();
+            if (TryGetSubstitutionValue(item, substitutionTable, out _, out _))
                 continue;
-            }
 
-            try
+            string translation = null;
+            if (enableTranslation)
             {
-                var translated = await TranslationHelper.TranslateTextAsync(item, "en", cancellationToken);
-                if (!string.IsNullOrWhiteSpace(translated) &&
-                    !string.Equals(translated, item, StringComparison.OrdinalIgnoreCase))
+                try
                 {
-                    translations[item] = translated;
-                    AppendTranslationLog($"{(isActor ? "Actor" : "Genre")} translation: {item} => {translated}");
-                }
-                else
-                {
-                    translations[item] = null;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug("Failed to translate metadata entry '{0}': {1}", item, ex.Message);
-                translations[item] = null;
-            }
-        }
-
-        string pluginConfigFolder = GetPluginConfigFolder();
-        string listFilePath = Path.Combine(pluginConfigFolder, listFilename);
-        string newFilePath = Path.Combine(pluginConfigFolder, newFilename);
-
-        lock (_fileLock)
-        {
-            // 1. Load existing track list into a case-insensitive set
-            var existingListItems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (File.Exists(listFilePath))
-            {
-                foreach (var line in File.ReadLines(listFilePath))
-                {
-                    var key = line.Split('=', 2).FirstOrDefault()?.Trim();
-                    if (!string.IsNullOrWhiteSpace(key)) existingListItems.Add(key);
-                }
-            }
-
-            // 2. Load existing new items list into a case-insensitive set
-            var existingNewItems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (File.Exists(newFilePath))
-            {
-                foreach (var line in File.ReadLines(newFilePath))
-                {
-                    var key = line.Split('=', 2).FirstOrDefault()?.Trim();
-                    if (!string.IsNullOrWhiteSpace(key)) existingNewItems.Add(key);
-                }
-            }
-
-            var newEntriesForList = new List<string>();
-            var newEntriesForNewFile = new List<string>();
-
-            foreach (var item in uniqueItems)
-            {
-                translations.TryGetValue(item, out var translation);
-                var formattedEntry = FormatMetadataEntry(item, isActor, translation);
-
-                // If it's completely brand new to our lifetime tracker list
-                if (!existingListItems.Contains(item))
-                {
-                    newEntriesForList.Add(formattedEntry);
-                    existingListItems.Add(item); // Avoid duplicates within the same batch
-                }
-
-                // Check if it lacks a translation mapping in your active substitution file
-                if (!substitutionTable.ContainsKey(item))
-                {
-                    // If it isn't already noted down in the "new items needing translation" scratchpad
-                    if (!existingNewItems.Contains(item))
+                    var translated = await TranslationHelper.TranslateTextAsync(item, "en", cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(translated) &&
+                        !string.Equals(translated, item, StringComparison.OrdinalIgnoreCase))
                     {
-                        newEntriesForNewFile.Add(formattedEntry);
-                        existingNewItems.Add(item);
+                        translation = translated;
+                        Plugin.LogTranslation($"{(isActor ? "Actor" : "Genre")} translation: {item} => {translated}");
                     }
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug("Failed to translate metadata entry '{0}': {1}", item, ex.Message);
+                }
             }
 
-            // 3. Commit changes securely to disk
-            if (newEntriesForList.Any())
-            {
-                File.AppendAllLines(listFilePath, newEntriesForList);
-                _logger.LogInformation("Logged {0} new unique items to tracker file: {1}", newEntriesForList.Count, listFilename);
-            }
+            translations[item] = translation;
 
-            if (newEntriesForNewFile.Any())
+            if (!existingFoundKeys.Contains(item))
             {
-                File.AppendAllLines(newFilePath, newEntriesForNewFile);
-                _logger.LogWarning("Logged {0} missing translations to patch file: {1}", newEntriesForNewFile.Count, newFilename);
+                remainingFoundLines.Add(FormatMetadataEntry(item, isActor, translation));
+                existingFoundKeys.Add(item);
             }
         }
 
+        File.WriteAllLines(foundFilePath, remainingFoundLines);
+
         return translations;
+    }
+
+    private static string ParseFoundKey(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return string.Empty;
+
+        var parts = line.Split('=', 2);
+        return parts[0].Trim();
+    }
+
+    internal static bool TryGetSubstitutionValue(string item, SubstitutionTable substitutionTable,
+        out string substitutionValue, out bool isBlank)
+    {
+        substitutionValue = null;
+        isBlank = false;
+
+        if (item == null)
+            return false;
+
+        if (substitutionTable.TryGetValue(item, out var value))
+        {
+            substitutionValue = value?.Trim();
+            isBlank = string.IsNullOrWhiteSpace(substitutionValue);
+            return true;
+        }
+
+        var blankKey = $"__{item}";
+        if (substitutionTable.TryGetValue(blankKey, out value))
+        {
+            substitutionValue = value?.Trim();
+            isBlank = true;
+            return true;
+        }
+
+        return false;
     }
 
     private static string FormatMetadataEntry(string key, bool isActor, string translation)

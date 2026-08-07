@@ -52,32 +52,37 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
         if (Configuration.EnableRealActorNames)
             await ConvertToRealActorNames(m, cancellationToken);
 
-        // Substitute title from substitutions_title.txt.
-        if (Configuration.EnableTitleSubstitution)
-            m.Title = Plugin.Instance.GetTitleSubstitutionTableFromFile().Substitute(m.Title);
+        // Substitute title from substitutions_title.txt if any mapping exists.
+        m.Title = Plugin.Instance.GetTitleSubstitutionTableFromFile().Substitute(m.Title);
 
-        // Track actors and genres for logging, then optionally substitute/translate the movie metadata.
+        // Track actors and genres for logging and found file generation.
         var actorSubTable = Plugin.Instance.GetActorSubstitutionTableFromFile();
-        var actorTranslations = await Plugin.Instance.TrackAndLogMetadataAsync(m.Actors, actorSubTable, "list_actor.txt", "new_actor.txt", true, cancellationToken);
+        var actorTranslations = await Plugin.Instance.TrackAndLogMetadataAsync(
+            m.Actors,
+            actorSubTable,
+            "found_actor.txt",
+            true,
+            Configuration.EnableActorTranslation,
+            cancellationToken);
 
-        if (Configuration.EnableActorSubstitution)
-        {
-            m.Actors = m.Actors
-                .Select(actor => ApplyActorReplacement(actor, actorSubTable, actorTranslations))
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .ToArray();
-        }
+        m.Actors = m.Actors
+            .Select(actor => ApplyActorReplacement(actor, actorSubTable, actorTranslations))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToArray();
 
         var genreSubTable = Plugin.Instance.GetGenreSubstitutionTableFromFile();
-        var genreTranslations = await Plugin.Instance.TrackAndLogMetadataAsync(m.Genres, genreSubTable, "list_genre.txt", "new_genre.txt", false, cancellationToken);
+        var genreTranslations = await Plugin.Instance.TrackAndLogMetadataAsync(
+            m.Genres,
+            genreSubTable,
+            "found_genre.txt",
+            false,
+            Configuration.EnableGenreTranslation,
+            cancellationToken);
 
-        if (Configuration.EnableGenreSubstitution)
-        {
-            m.Genres = m.Genres
-                .Select(genre => ApplyGenreReplacement(genre, genreSubTable, genreTranslations))
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .ToArray();
-        }
+        m.Genres = m.Genres
+            .Select(genre => ApplyGenreReplacement(genre, genreSubTable, genreTranslations))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToArray();
 
         // Translate movie info.
         await TranslateMovieInfo(m, info.MetadataLanguage, cancellationToken);
@@ -357,9 +362,14 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
 
     private static string ApplyActorReplacement(string actor, SubstitutionTable actorSubTable, Dictionary<string, string> actorTranslations)
     {
-        if (actorSubTable.TryGetValue(actor, out var substitute) && !string.IsNullOrWhiteSpace(substitute))
+        if (Plugin.TryGetSubstitutionValue(actor, actorSubTable, out var substitute, out var isBlank) && !string.IsNullOrWhiteSpace(substitute))
         {
             return substitute;
+        }
+
+        if (isBlank)
+        {
+            return string.Empty;
         }
 
         if (actorTranslations.TryGetValue(actor, out var translation) && !string.IsNullOrWhiteSpace(translation))
@@ -372,9 +382,14 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
 
     private static string ApplyGenreReplacement(string genre, SubstitutionTable genreSubTable, Dictionary<string, string> genreTranslations)
     {
-        if (genreSubTable.TryGetValue(genre, out var substitute) && !string.IsNullOrWhiteSpace(substitute))
+        if (Plugin.TryGetSubstitutionValue(genre, genreSubTable, out var substitute, out var isBlank) && !string.IsNullOrWhiteSpace(substitute))
         {
             return substitute;
+        }
+
+        if (isBlank)
+        {
+            return string.Empty;
         }
 
         if (genreTranslations.TryGetValue(genre, out var translation) && !string.IsNullOrWhiteSpace(translation))

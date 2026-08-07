@@ -48,6 +48,20 @@ public class SubstitutionTable : Dictionary<string, string>
             : table.Aggregate(new StringBuilder(source), (sb, kvp) => sb.Replace(kvp.Key, kvp.Value)).ToString();
     }
 
+    public string SubstituteExact(string source)
+    {
+        if (source is null)
+            return source;
+
+        if (TryGetValue(source, out var value))
+            return value ?? string.Empty;
+
+        if (TryGetValue($"__{source}", out var blankValue))
+            return blankValue ?? string.Empty;
+
+        return source;
+    }
+
     public IEnumerable<string> Substitute(IEnumerable<string> source)
     {
         var table = this;

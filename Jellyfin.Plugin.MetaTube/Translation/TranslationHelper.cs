@@ -87,10 +87,28 @@ public static class TranslationHelper
             throw new ArgumentException($"language not allowed: {to}");
 
         if (Configuration.EnableTitleTranslation && !string.IsNullOrWhiteSpace(m.Title))
-            m.Title = await TranslateAsync(m.Title, AutoLanguageCode, to, cancellationToken);
+        {
+            var originalTitle = m.Title;
+            var translatedTitle = await TranslateAsync(originalTitle, AutoLanguageCode, to, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(translatedTitle) &&
+                !string.Equals(translatedTitle, originalTitle, StringComparison.OrdinalIgnoreCase))
+            {
+                m.Title = translatedTitle;
+                Plugin.LogTranslation($"Title translation: {originalTitle} => {translatedTitle}");
+            }
+        }
 
         if (Configuration.EnableSummaryTranslation && !string.IsNullOrWhiteSpace(m.Summary))
-            m.Summary = await TranslateAsync(m.Summary, AutoLanguageCode, to, cancellationToken);
+        {
+            var originalSummary = m.Summary;
+            var translatedSummary = await TranslateAsync(originalSummary, AutoLanguageCode, to, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(translatedSummary) &&
+                !string.Equals(translatedSummary, originalSummary, StringComparison.OrdinalIgnoreCase))
+            {
+                m.Summary = translatedSummary + "\n\n====\n\n" + originalSummary;
+                Plugin.LogTranslation($"Summary translation: {originalSummary.Substring(0, Math.Min(60, originalSummary.Length)).Replace('\n', ' ')}... => {translatedSummary.Substring(0, Math.Min(60, translatedSummary.Length)).Replace('\n', ' ')}...");
+            }
+        }
     }
 
     public static async Task<string> TranslateTextAsync(string q, string to, CancellationToken cancellationToken)
