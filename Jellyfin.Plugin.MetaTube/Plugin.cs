@@ -210,7 +210,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         var blankKey = $"__{item}";
         if (substitutionTable.TryGetValue(blankKey, out value))
         {
-            substitutionValue = value?.Trim();
+            substitutionValue = null;
             isBlank = true;
             return true;
         }
