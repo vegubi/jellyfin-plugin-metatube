@@ -86,11 +86,22 @@ public static class TranslationHelper
         if (string.Equals(to, JapaneseLanguageCode, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException($"language not allowed: {to}");
 
-        if (Configuration.TranslationMode.HasFlag(TranslationMode.Title) && !string.IsNullOrWhiteSpace(m.Title))
+        if (Configuration.EnableTitleTranslation && !string.IsNullOrWhiteSpace(m.Title))
             m.Title = await TranslateAsync(m.Title, AutoLanguageCode, to, cancellationToken);
 
-        if (Configuration.TranslationMode.HasFlag(TranslationMode.Summary) && !string.IsNullOrWhiteSpace(m.Summary))
+        if (Configuration.EnableSummaryTranslation && !string.IsNullOrWhiteSpace(m.Summary))
             m.Summary = await TranslateAsync(m.Summary, AutoLanguageCode, to, cancellationToken);
+    }
+
+    public static async Task<string> TranslateTextAsync(string q, string to, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(q))
+            return q;
+
+        if (string.Equals(to, JapaneseLanguageCode, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException($"language not allowed: {to}");
+
+        return await TranslateAsync(q, AutoLanguageCode, to, cancellationToken);
     }
 
     private static async Task<T> RetryAsync<T>(Func<Task<T>> func, int retryCount)

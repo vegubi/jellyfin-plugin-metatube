@@ -55,7 +55,9 @@ public class PluginConfiguration : BasePluginConfiguration
 
     public static string DefaultTaglineTemplate => "配信開始日 {date}";
 
-    public TranslationMode TranslationMode { get; set; } = TranslationMode.Disabled;
+    public bool EnableTitleTranslation { get; set; } = false;
+
+    public bool EnableSummaryTranslation { get; set; } = false;
 
     public TranslationEngine TranslationEngine { get; set; } = TranslationEngine.Baidu;
 

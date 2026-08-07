@@ -1,5 +1,6 @@
 using Jellyfin.Plugin.MetaTube.Configuration;
 using Jellyfin.Plugin.MetaTube.Helpers;
+using Jellyfin.Plugin.MetaTube.Translation;
 using MediaBrowser.Common.Plugins;
 using Microsoft.Extensions.Logging;
 
@@ -79,18 +80,80 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public SubstitutionTable GetGenreSubstitutionTableFromFile() =>
         GetSubstitutionTableFromFile("substitutions_genre.txt", "Original Genre=New Genre");
 
+    private string GetPluginConfigFolder()
+    {
+        var pluginConfigFolder = Path.Combine(_applicationPaths.PluginConfigurationsPath, GetType().Namespace);
+        if (!Directory.Exists(pluginConfigFolder))
+        {
+            Directory.CreateDirectory(pluginConfigFolder);
+        }
+
+        return pluginConfigFolder;
+    }
+
+    private string GetTranslationLogFilePath() => Path.Combine(GetPluginConfigFolder(), "translation_log.txt");
+
+    private void AppendTranslationLog(string message)
+    {
+        var logFilePath = GetTranslationLogFilePath();
+        var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        File.AppendAllText(logFilePath, $"[{timestamp}] {message}{Environment.NewLine}");
+    }
 
     private readonly object _fileLock = new object();
 
-    public void TrackAndLogMetadata(
+    public async Task<Dictionary<string, string>> TrackAndLogMetadataAsync(
         IEnumerable<string> incomingItems,
         SubstitutionTable substitutionTable,
         string listFilename,
-        string newFilename)
+        string newFilename,
+        bool isActor,
+        CancellationToken cancellationToken)
     {
-        if (incomingItems == null || !incomingItems.Any()) return;
+        var translations = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        string pluginConfigFolder = Path.Combine(_applicationPaths.PluginConfigurationsPath, GetType().Namespace);
+        if (incomingItems == null)
+            return translations;
+
+        var uniqueItems = incomingItems
+            .Select(x => x?.Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (!uniqueItems.Any())
+            return translations;
+
+        foreach (var item in uniqueItems)
+        {
+            if (substitutionTable.TryGetValue(item, out var substitutionValue))
+            {
+                translations[item] = substitutionValue?.Trim();
+                continue;
+            }
+
+            try
+            {
+                var translated = await TranslationHelper.TranslateTextAsync(item, "en", cancellationToken);
+                if (!string.IsNullOrWhiteSpace(translated) &&
+                    !string.Equals(translated, item, StringComparison.OrdinalIgnoreCase))
+                {
+                    translations[item] = translated;
+                    AppendTranslationLog($"{(isActor ? "Actor" : "Genre")} translation: {item} => {translated}");
+                }
+                else
+                {
+                    translations[item] = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug("Failed to translate metadata entry '{0}': {1}", item, ex.Message);
+                translations[item] = null;
+            }
+        }
+
+        string pluginConfigFolder = GetPluginConfigFolder();
         string listFilePath = Path.Combine(pluginConfigFolder, listFilename);
         string newFilePath = Path.Combine(pluginConfigFolder, newFilename);
 
@@ -121,12 +184,15 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
             var newEntriesForList = new List<string>();
             var newEntriesForNewFile = new List<string>();
 
-            foreach (var item in incomingItems.Select(x => x?.Trim()).Where(x => !string.IsNullOrWhiteSpace(x)))
+            foreach (var item in uniqueItems)
             {
+                translations.TryGetValue(item, out var translation);
+                var formattedEntry = FormatMetadataEntry(item, isActor, translation);
+
                 // If it's completely brand new to our lifetime tracker list
                 if (!existingListItems.Contains(item))
                 {
-                    newEntriesForList.Add($"{item}={item}");
+                    newEntriesForList.Add(formattedEntry);
                     existingListItems.Add(item); // Avoid duplicates within the same batch
                 }
 
@@ -136,7 +202,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
                     // If it isn't already noted down in the "new items needing translation" scratchpad
                     if (!existingNewItems.Contains(item))
                     {
-                        newEntriesForNewFile.Add($"{item}={item}");
+                        newEntriesForNewFile.Add(formattedEntry);
                         existingNewItems.Add(item);
                     }
                 }
@@ -155,5 +221,29 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
                 _logger.LogWarning("Logged {0} missing translations to patch file: {1}", newEntriesForNewFile.Count, newFilename);
             }
         }
+
+        return translations;
+    }
+
+    private static string FormatMetadataEntry(string key, bool isActor, string translation)
+    {
+        if (isActor)
+        {
+            if (!string.IsNullOrWhiteSpace(translation) &&
+                !string.Equals(key, translation, StringComparison.OrdinalIgnoreCase))
+            {
+                return $"{key}={key} ({translation})";
+            }
+
+            return $"{key}={key}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(translation) &&
+            !string.Equals(key, translation, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{key}={translation}";
+        }
+
+        return $"{key}={key}";
     }
 }
