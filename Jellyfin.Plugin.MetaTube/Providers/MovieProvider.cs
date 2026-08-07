@@ -21,11 +21,13 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
     private const string AvBase = "AVBASE";
     private const string Gfriends = "Gfriends";
     private const string Rating = "JP-18+";
-
     private static readonly string[] AvBaseSupportedProviderNames = { "DUGA", "FANZA", "Getchu", "MGS" };
+
+    private readonly ILogger<MovieProvider> _logger;
 
     public MovieProvider(ILogger<MovieProvider> logger) : base(logger)
     {
+        _logger = logger;
     }
 
     public async Task<MetadataResult<Movie>> GetMetadata(MovieInfo info,
@@ -39,7 +41,7 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
             if (firstResult != null) pid = firstResult.GetPid(Plugin.ProviderId);
         }
 
-        Logger.Info("Get movie info: {0}", pid.ToString());
+        _logger.LogInformation("Get movie info: {ProviderId}", pid.ToString());
 
         var m = await ApiClient.GetMovieInfoAsync(pid.Provider, pid.Id, cancellationToken);
 
@@ -57,13 +59,29 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
 
         // Substitute actors from substitutions_actor.txt
         if (Configuration.EnableActorSubstitution)
-            // m.Actors = Configuration.GetActorSubstitutionTable().Substitute(m.Actors).ToArray();
-            m.Actors = Plugin.Instance.GetActorSubstitutionTableFromFile().Substitute(m.Actors).ToArray();
+        {
+            // Fetch the operational substitution mapping table
+            var actorSubTable = Plugin.Instance.GetActorSubstitutionTableFromFile();
+
+            // Proactively track against historical lists and flag missing matches
+            Plugin.Instance.TrackAndLogMetadata(m.Actors, actorSubTable, "list_actor.txt", "new_actor.txt");
+
+            // Run normal replacement sequence
+            m.Actors = actorSubTable.Substitute(m.Actors).ToArray();
+        }
 
         // Substitute genres from substitutions_genre.txt
         if (Configuration.EnableGenreSubstitution)
-            // m.Genres = Configuration.GetGenreSubstitutionTable().Substitute(m.Genres).ToArray();
-            m.Genres = Plugin.Instance.GetGenreSubstitutionTableFromFile().Substitute(m.Genres).ToArray();
+        {
+            // Fetch the operational substitution mapping table
+            var genreSubTable = Plugin.Instance.GetGenreSubstitutionTableFromFile();
+
+            // Proactively track against historical lists and flag missing matches
+            Plugin.Instance.TrackAndLogMetadata(m.Genres, genreSubTable, "list_genre.txt", "new_genre.txt");
+
+            // Run normal replacement sequence
+            m.Genres = genreSubTable.Substitute(m.Genres).ToArray();
+        }
 
         // Translate movie info.
         if (Configuration.TranslationMode != TranslationMode.Disabled)
@@ -133,24 +151,24 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
         if (Configuration.EnableCollections && !string.IsNullOrWhiteSpace(m.Series))
         {
             result.Item.AddCollection(m.Series);
-            Logger.Info("Add Collection for movie {0} [{1}]", pid.ToString(), m.Series);
+            _logger.LogInformation("Add Collection for movie {0} [{1}]", pid.ToString(), m.Series);
         }
 
         // Add studio.
         if (!string.IsNullOrWhiteSpace(m.Maker))
             result.Item.AddStudio(m.Maker);
 
-        // Add tag (series).
-        if (!string.IsNullOrWhiteSpace(m.Series))
-            result.Item.AddTag(m.Series);
+        // // Add tag (series).
+        // if (!string.IsNullOrWhiteSpace(m.Series))
+        //     result.Item.AddTag(m.Series);
 
-        // Add tag (maker).
-        if (!string.IsNullOrWhiteSpace(m.Maker))
-            result.Item.AddTag(m.Maker);
+        // // Add tag (maker).
+        // if (!string.IsNullOrWhiteSpace(m.Maker))
+        //     result.Item.AddTag(m.Maker);
 
-        // Add tag (label).
-        if (!string.IsNullOrWhiteSpace(m.Label))
-            result.Item.AddTag(m.Label);
+        // // Add tag (label).
+        // if (!string.IsNullOrWhiteSpace(m.Label))
+        //     result.Item.AddTag(m.Label);
 
         // Add director.
         if (Configuration.EnableDirectors && !string.IsNullOrWhiteSpace(m.Director))
@@ -184,13 +202,13 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
         if (string.IsNullOrWhiteSpace(pid.Id) || string.IsNullOrWhiteSpace(pid.Provider))
         {
             // Search movie by name.
-            Logger.Info("Search for movie: {0}", info.Name);
+            _logger.LogInformation("Search for movie: {0}", info.Name);
             searchResults.AddRange(await ApiClient.SearchMovieAsync(info.Name, pid.Provider, cancellationToken));
         }
         else
         {
             // Exact search.
-            Logger.Info("Search for movie: {0}", pid.ToString());
+            _logger.LogInformation("Search for movie: {0}", pid.ToString());
             searchResults.Add(await ApiClient.GetMovieInfoAsync(pid.Provider, pid.Id,
                 pid.Update != true, cancellationToken));
         }
@@ -208,14 +226,14 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
             }
             else
             {
-                Logger.Warn("Movie provider filter enabled but never used");
+                _logger.LogWarning("Movie provider filter enabled but never used");
             }
         }
 
         var results = new List<RemoteSearchResult>();
         if (!searchResults.Any())
         {
-            Logger.Warn("Movie not found or has been filtered: {0}", pid.Id);
+            _logger.LogWarning("Movie not found or has been filtered: {0}", pid.Id);
             return results;
         }
 
@@ -242,7 +260,7 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
             var results = await ApiClient.SearchActorAsync(actor.Name, cancellationToken);
             if (results?.Any() != true)
             {
-                Logger.Warn("Actor not found: {0}", actor.Name);
+                _logger.LogWarning("Actor not found: {0}", actor.Name);
                 return;
             }
 
@@ -264,7 +282,7 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
         }
         catch (Exception e)
         {
-            Logger.Error("Get actor image error: {0} ({1})", actor.Name, e.Message);
+            _logger.LogError("Get actor image error: {0} ({1})", actor.Name, e.Message);
         }
     }
 
@@ -277,7 +295,7 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
             var searchResults = await ApiClient.SearchMovieAsync(m.Id, AvBase, cancellationToken);
             if (searchResults?.Any() != true)
             {
-                Logger.Warn("Movie not found on AVBASE: {0}", m.Id);
+                _logger.LogWarning("Movie not found on AVBASE: {0}", m.Id);
                 return;
             }
 
@@ -285,7 +303,7 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
             {
                 var similarity = CalculateTitleSimilarity(m, result);
 
-                Logger.Info("Calculate movie title similarity for {0} ({1}) and {2} ({3}): {4:0.00%}",
+                _logger.LogInformation("Calculate movie title similarity for {0} ({1}) and {2} ({3}): {4:0.00%}",
                     m.Id, m.Provider, result.Id, result.Provider, similarity);
 
                 if (similarity >= 0.8)
@@ -296,11 +314,11 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
                 }
             }
 
-            Logger.Warn("No matching movie found on AVBASE for {0}", m.Id);
+            _logger.LogWarning("No matching movie found on AVBASE for {0}", m.Id);
         }
         catch (Exception e)
         {
-            Logger.Error("Convert to real actor names error: {0} ({1})", m.Number, e.Message);
+            _logger.LogError("Convert to real actor names error: {0} ({1})", m.Number, e.Message);
         }
     }
 
@@ -333,12 +351,12 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
     {
         try
         {
-            Logger.Info("Translate movie info language: {0} => {1}", m.Number, language);
+            _logger.LogInformation("Translate movie info language: {0} => {1}", m.Number, language);
             await TranslationHelper.TranslateAsync(m, language, cancellationToken);
         }
         catch (Exception e)
         {
-            Logger.Error("Translate error: {0}", e.Message);
+            _logger.LogError("Translate error: {0}", e.Message);
         }
     }
 

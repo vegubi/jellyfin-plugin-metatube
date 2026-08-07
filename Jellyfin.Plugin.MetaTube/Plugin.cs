@@ -28,40 +28,6 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public static Plugin Instance { get; private set; }
     public IEnumerable<PluginPageInfo> GetPages()
     {
-        // _logger.LogInformation("--- METATUBE PLUGIN PATH DEBUGGING ---");
-        // _logger.LogInformation("ConfigurationDirectoryPath: {0}", _applicationPaths.ConfigurationDirectoryPath.ToString());
-
-        // string pluginConfigFolder = Path.Combine(_applicationPaths.PluginConfigurationsPath, GetType().Namespace);
-        // string targetFilePath = Path.Combine(pluginConfigFolder, "substitutions_actor.txt");
-
-        // try
-        // {
-        //     // Ensure the folder exists. Docker will safely create it inside /config/...
-        //     if (!Directory.Exists(pluginConfigFolder))
-        //     {
-        //         Directory.CreateDirectory(pluginConfigFolder);
-        //         _logger.LogInformation("Created missing plugin configuration folder at: {0}", pluginConfigFolder);
-        //     }
-
-        //     // Ensure the text file exists. If missing, create it with sample instructions
-        //     if (!File.Exists(targetFilePath))
-        //     {
-        //         File.WriteAllText(targetFilePath, "John Doe=Jonathan Doe\nJane Doe=Jennifer Doe");
-        //         _logger.LogInformation("Created placeholder file at: {0}", targetFilePath);
-        //     }
-
-        //     // Read the content of the file and output it to the log
-        //     string fileContent = File.ReadAllText(targetFilePath);
-
-        //     _logger.LogInformation("--- START OF substitutions_actor.txt ---");
-        //     _logger.LogInformation("{0}", fileContent);
-        //     _logger.LogInformation("--- END OF substitutions_actor.txt ---");
-        // }
-        // catch (Exception ex)
-        // {
-        //     _logger.LogError("Failed to handle substitutions file: {0}", ex.Message);
-        // }
-
         return new[]
         {
             new PluginPageInfo
@@ -112,4 +78,82 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 
     public SubstitutionTable GetGenreSubstitutionTableFromFile() =>
         GetSubstitutionTableFromFile("substitutions_genre.txt", "Original Genre=New Genre");
+
+
+    private readonly object _fileLock = new object();
+
+    public void TrackAndLogMetadata(
+        IEnumerable<string> incomingItems,
+        SubstitutionTable substitutionTable,
+        string listFilename,
+        string newFilename)
+    {
+        if (incomingItems == null || !incomingItems.Any()) return;
+
+        string pluginConfigFolder = Path.Combine(_applicationPaths.PluginConfigurationsPath, GetType().Namespace);
+        string listFilePath = Path.Combine(pluginConfigFolder, listFilename);
+        string newFilePath = Path.Combine(pluginConfigFolder, newFilename);
+
+        lock (_fileLock)
+        {
+            // 1. Load existing track list into a case-insensitive set
+            var existingListItems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (File.Exists(listFilePath))
+            {
+                foreach (var line in File.ReadLines(listFilePath))
+                {
+                    var key = line.Split('=', 2).FirstOrDefault()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(key)) existingListItems.Add(key);
+                }
+            }
+
+            // 2. Load existing new items list into a case-insensitive set
+            var existingNewItems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (File.Exists(newFilePath))
+            {
+                foreach (var line in File.ReadLines(newFilePath))
+                {
+                    var key = line.Split('=', 2).FirstOrDefault()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(key)) existingNewItems.Add(key);
+                }
+            }
+
+            var newEntriesForList = new List<string>();
+            var newEntriesForNewFile = new List<string>();
+
+            foreach (var item in incomingItems.Select(x => x?.Trim()).Where(x => !string.IsNullOrWhiteSpace(x)))
+            {
+                // If it's completely brand new to our lifetime tracker list
+                if (!existingListItems.Contains(item))
+                {
+                    newEntriesForList.Add($"{item}={item}");
+                    existingListItems.Add(item); // Avoid duplicates within the same batch
+                }
+
+                // Check if it lacks a translation mapping in your active substitution file
+                if (!substitutionTable.ContainsKey(item))
+                {
+                    // If it isn't already noted down in the "new items needing translation" scratchpad
+                    if (!existingNewItems.Contains(item))
+                    {
+                        newEntriesForNewFile.Add($"{item}={item}");
+                        existingNewItems.Add(item);
+                    }
+                }
+            }
+
+            // 3. Commit changes securely to disk
+            if (newEntriesForList.Any())
+            {
+                File.AppendAllLines(listFilePath, newEntriesForList);
+                _logger.LogInformation("Logged {0} new unique items to tracker file: {1}", newEntriesForList.Count, listFilename);
+            }
+
+            if (newEntriesForNewFile.Any())
+            {
+                File.AppendAllLines(newFilePath, newEntriesForNewFile);
+                _logger.LogWarning("Logged {0} missing translations to patch file: {1}", newEntriesForNewFile.Count, newFilename);
+            }
+        }
+    }
 }

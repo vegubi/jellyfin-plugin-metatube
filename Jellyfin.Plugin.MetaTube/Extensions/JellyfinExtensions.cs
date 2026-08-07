@@ -8,6 +8,7 @@ namespace Jellyfin.Plugin.MetaTube.Extensions;
 
 public static class JellyfinExtensions
 {
+    // Remove this logger class and all instances with standard _logger
     #region Logger
 
     public static void Debug(this ILogger logger, string message, params object[] args)
